@@ -67,7 +67,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM --- Vercel publish goes here in the hosting phase (npx vercel --prod). ---
+REM Publish: uploads only public\ + api\ + vercel.json (.vercelignore allow-list)
+REM to https://seat-scout-tan.vercel.app. Uses the CLI's saved login; a failure
+REM here is logged but does not fail the run (the scan and report are already done).
+call npx vercel --prod --yes >> "data\scan.log" 2>&1
+if errorlevel 1 echo vercel publish failed >> "data\scan.log"
 
-echo scan + report OK >> "data\scan.log"
+echo scan + report + publish OK >> "data\scan.log"
 exit /b 0

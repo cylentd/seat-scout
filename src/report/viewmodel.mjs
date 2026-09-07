@@ -72,6 +72,7 @@ function availableShowVM(cfg, analyzed) {
     tierRank: analyzed.bestTier ? TIERS[analyzed.bestTier].rank : 99,
     badges: badgesFor(analyzed),
     pairs,
+    open: { center: analyzed.counts.open.center, midBack: analyzed.counts.open.midBack, flexible: analyzed.counts.open.flexible },
     avail: availabilityFor(analyzed),
     bookingUrl: bookingUrl(cfg, analyzed),
   };
@@ -93,6 +94,7 @@ function unavailableShowVM(cfg, show) {
     tierRank: 99,
     badges: [],
     pairs: { center: 0, midBack: 0, flexible: 0, total: 0 },
+    open: { center: 0, midBack: 0, flexible: 0 },
     avail: null,
     bookingUrl: bookingUrl(cfg, show),
   };

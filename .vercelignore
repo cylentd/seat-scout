@@ -1,0 +1,9 @@
+# Allow-list deploy: only the static site, the edge function, and the Vercel config.
+# Everything else (scan caches, seat maps, watchlist.json with its bot token,
+# scanner source) stays local.
+*
+!public
+!public/**
+!api
+!api/**
+!vercel.json

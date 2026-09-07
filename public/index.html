@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Seat Scout</title>
+  <meta name="description" content="Which IMAX 70mm showtimes still have two good seats together, across the Bay Area and Los Angeles. Counted twice a day.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0d0b10">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffc857' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3'/%3E%3Cpath d='M3 11v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v2H7v-2a2 2 0 0 0-4 0Z'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Karla:ital,wght@0,400;0,500;0,700;1,400&family=Space+Mono:wght@400;700&display=swap">
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="mast">
+    <a class="wordmark" href="#/" aria-label="Seat Scout home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3"/><path d="M3 11v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v2H7v-2a2 2 0 0 0-4 0Z"/></svg>
+      <span>Seat Scout</span>
+    </a>
+    <span class="fresh" id="fresh"></span>
+  </header>
+
+  <main id="app" aria-live="polite">
+    <p class="notice">Rolling the film…</p>
+    <noscript><p class="notice">Seat Scout needs JavaScript to read the latest counts.</p></noscript>
+  </main>
+
+  <footer class="foot">
+    <p>Counts refresh twice a day. Seat maps stay with the theatres, so you pick your exact seats when you book. Times are Pacific. Your location, if you share it, never leaves your browser.</p>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>

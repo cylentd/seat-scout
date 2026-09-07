@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": null,
+  "outputDirectory": "public",
+  "cleanUrls": true,
+  "headers": [
+    {
+      "source": "/signals.json",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, s-maxage=600, must-revalidate" }]
+    }
+  ]
+}

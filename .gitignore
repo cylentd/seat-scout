@@ -6,7 +6,8 @@
 /data/
 
 # Generated outputs
-/public/
+/public/signals.json
+/.vercel/
 /report.html
 
 # Dependencies (project is zero-dep today, but just in case)
@@ -15,3 +16,4 @@
 # OS / editor junk
 .DS_Store
 Thumbs.db
+

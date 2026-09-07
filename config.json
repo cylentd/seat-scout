@@ -21,14 +21,15 @@
     "scanDays": 40,
     "stopAfterEmptyDays": 4,
     "skipPairlessAfter": 2,
+    "_theatres_note": "city/lat/lng feed the public site's nearest-first sort (haversine, ~1 km accuracy is plenty). metro groups the Bay Area / LA filter. slug (when known) builds the theatre's Fandango page link.",
     "theatres": [
-      { "id": "AAOPK", "name": "Regal Hacienda Crossings", "chainCode": "REGL", "slug": "regal-hacienda-crossings-screenx-imax-and-rpx-aaopk", "metro": "bay", "directBooking": { "label": "Regal", "url": "https://www.regmovies.com/theatres/regal-hacienda-crossings-0347" } },
-      { "id": "AANEM", "name": "AMC Metreon 16", "chainCode": "AMC", "slug": "amc-metreon-16-aanem", "metro": "bay" },
-      { "id": "AAACD", "name": "TCL Chinese Theatres and IMAX", "chainCode": "", "metro": "la" },
-      { "id": "AAAWX", "name": "Universal Cinema, an AMC Theatre", "chainCode": "AMC", "metro": "la" },
-      { "id": "AAVPA", "name": "Regal LA Live", "chainCode": "REGL", "metro": "la" },
-      { "id": "AAEDM", "name": "Regal Edwards Ontario Palace", "chainCode": "REGL", "metro": "la" },
-      { "id": "AABTB", "name": "Regal Irvine Spectrum", "chainCode": "REGL", "metro": "la" }
+      { "id": "AAOPK", "name": "Regal Hacienda Crossings", "chainCode": "REGL", "slug": "regal-hacienda-crossings-screenx-imax-and-rpx-aaopk", "metro": "bay", "city": "Dublin", "lat": 37.7057, "lng": -121.8955, "directBooking": { "label": "Regal", "url": "https://www.regmovies.com/theatres/regal-hacienda-crossings-0347" } },
+      { "id": "AANEM", "name": "AMC Metreon 16", "chainCode": "AMC", "slug": "amc-metreon-16-aanem", "metro": "bay", "city": "San Francisco", "lat": 37.7846, "lng": -122.4034 },
+      { "id": "AAACD", "name": "TCL Chinese Theatres and IMAX", "chainCode": "", "metro": "la", "city": "Hollywood", "lat": 34.1022, "lng": -118.3410 },
+      { "id": "AAAWX", "name": "Universal Cinema, an AMC Theatre", "chainCode": "AMC", "metro": "la", "city": "Universal City", "lat": 34.1365, "lng": -118.3536 },
+      { "id": "AAVPA", "name": "Regal LA Live", "chainCode": "REGL", "metro": "la", "city": "Downtown LA", "lat": 34.0446, "lng": -118.2660 },
+      { "id": "AAEDM", "name": "Regal Edwards Ontario Palace", "chainCode": "REGL", "metro": "la", "city": "Ontario", "lat": 34.0699, "lng": -117.5595 },
+      { "id": "AABTB", "name": "Regal Irvine Spectrum", "chainCode": "REGL", "metro": "la", "city": "Irvine", "lat": 33.6505, "lng": -117.7438 }
     ],
     "movies": [
       {

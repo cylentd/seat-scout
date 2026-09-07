@@ -1,8 +1,10 @@
 # Seat Scout
 
-Finds showtimes with good adjacent seats for a movie at a theatre, so you don't have
-to click through every date and time yourself. Currently scoped to **The Odyssey in
-IMAX 70mm at Regal Hacienda Crossings (Dublin, CA)** — all knobs live in `config.json`.
+Finds showtimes with good adjacent seats for hard-to-get movies, so you don't have to
+click through every date and time yourself. A local scanner watches a **watchlist** of
+movies × theatres (currently The Odyssey in IMAX 70mm at seven Bay Area and Los Angeles
+houses) and publishes counts-only **signals** to a static public site. All knobs live in
+`config.json`.
 
 ## How it works
 
@@ -260,6 +262,65 @@ otherwise the local `report.html` remains where you browse seat maps.
 Run it after `report.mjs` — it warns if `report.html` is older than the latest scan rather
 than describing a stale file with fresh numbers.
 
+## Public site (`public/`)
+
+The hostable version publishes **signals, not inventory**. `npm run signals` reads every
+per-target scan cache and writes `public/signals.json`: per showtime, open seats per tier
+(`open`, for solo goers), adjacent pairs per tier (`pairs`), usable seats, % full,
+sold-out status, and a Fandango booking link. No seat grid, no coordinates (guarded by
+`tests/signals.test.mjs`). Each theatre also carries `metro`, `city`, `lat`, `lng` joined
+from the watchlist pool in `config.json`, so adding coordinates never needs a rescan.
+
+`public/index.html` + `site.css` + `site.js` render that file with no build step and no
+dependencies. Neutral about party size: a **Going: Solo / Two together** switch (remembered
+per browser) decides whether tiers, counts, and picks are computed from `open` or `pairs`.
+Two views in one page, routed by hash:
+
+| View | URL | Shows |
+|---|---|---|
+| Landing | `/` | marquee hero with a live ticker; theatres ordered **best seats** (most evening/weekend shows with center seats) or **nearest** (opt-in device location, haversine, never sent anywhere); Bay Area / LA filter; per theatre a **70mm film strip** — one frame per day lit by the best seat tier that day |
+| Theatre | `/#/t/<fandangoId>` | three **ticket-stub** best bets (off-hours first, then tier, then count), Going / When / Seats filters, showtimes grouped by day with tier pill, per-tier counts, % full, and Book links |
+
+Tier colours read as medals: **Center** gold, **Mid-back** silver, **Edge** bronze;
+sold out is a hatched red frame. Nothing else on the page is coloured, so colour always
+means seat quality. Single dark theme, on purpose. Shows already past (Pacific time) are
+dropped client-side, so a twice-daily file still reads correctly all day.
+
+**Mobile-first.** `site.css` is written base-up: the un-prefixed rules target a small
+phone, and `min-width` breakpoints (640 / 760 / 900px) add room as the viewport grows —
+never the reverse. Every tappable control (buttons, segmented filters, book links) keeps
+a `--tap: 44px` minimum height on mobile (segmented-control pills are the deliberate
+exception, ~38px, matching a native segmented control).
+
+Two mobile bugs worth knowing about if you touch this file, since both would otherwise
+recur:
+
+- **The marquee headline can't overflow a 320px phone.** `.marquee h1`'s `clamp()` floor
+  is sized for the smallest common phone width, then grows again at each breakpoint —
+  a desktop-first clamp floor is the classic way a hero headline blows out a narrow screen.
+- **The 70mm date strip scrolls instead of squeezing.** `.frames` is a horizontally
+  scrolling flex row with a legible minimum frame width (so 25 days never squeeze into
+  invisible slivers) — but the real fix was `min-width: 0` on `.film`, `.frames`, and
+  `.film-axis`. They sit inside a *nested* grid (`.film-wrap`), and a grid item's default
+  `min-width: auto` measures its content's natural size for the grid track — so the
+  frames' own content-based width was silently forcing the track (and the whole card)
+  wider than the viewport, overriding `overflow-x: auto` entirely. Any scrollable child
+  added inside a grid or flex layout needs `min-width: 0` on every nested level, not just
+  the outermost one, or this recurs somewhere else.
+
+**Nearest by default.** `api/geo.js` is a zero-dependency Vercel edge function that
+returns the visitor's approximate coordinates from Vercel's IP-geolocation headers
+(city-level, no permission prompt). The site calls it on load and sorts theatres nearest-
+first; the "Nearest to me" button then upgrades to a precise device fix on request. Locally
+the route 404s and the site falls back to best-seats order.
+
+Preview locally with any static server, e.g. `python -m http.server 8790 --directory public`.
+Live at **https://seat-scout-tan.vercel.app** (Vercel project `seat-scout`). `vercel.json`
+points Vercel at `public/` as a plain static deploy; `.vercelignore` is an allow-list so only
+`public/`, `api/`, and `vercel.json` ever upload (never scan caches or `watchlist.json`).
+`signals.json` is gitignored and uploaded by each deploy, with a 10-minute edge cache.
+Deploy by hand with `npx vercel --prod --yes`; `scan-daily.bat` does it after every scan.
+
 ## Discord bot (`npm run bot` / `discord-bot.bat`)
 
 Tag **@Seat Scout** in a channel (or DM it) and it scouts on demand and replies in
@@ -339,6 +400,11 @@ src/
   report.mjs         thin entry: load → build model → render → write
   report-load.mjs    disk side of report building (config + scan + history)
   share-report.mjs   post report.html to Discord with a summary embed
+  signals.mjs        public counts-only export of every target → public/signals.json
+public/
+  index.html         hosted site shell (fonts, masthead, footer copy)
+  site.css           tokens (dark + light), medal tier colours, layout
+  site.js            landing + theatre views rendered from signals.json
   report/
     theme.mjs        single source of truth for tier/seat colours
     format.mjs       date/time/label formatting (pure)
@@ -354,19 +420,23 @@ script receives a serialised copy, so the legend, badges, and maps can't drift.
 
 ## Config (`config.json`)
 
-- `movieCodes` — Regal HO-codes to include (the Open Caption variant is tagged in the report)
-- `formatFilter.mustMatchAttrs` — regexes a performance's attributes must all match (`IMAX`, `70\s?mm`)
-- `tiers` — seat quality zones, tuned for auditorium 21:
-  - `excludeRows` — never acceptable (front 3 rows)
-  - `center` — rows E–G, columns 11–20 (the sweet spot)
-  - `midBack` — rows D–I, columns 6–25 (good, not perfect)
-  - anything else outside `excludeRows` counts as `flexible`
-- `partySize` — informational for now; pair logic finds 2-adjacent runs
+- `watchlist.theatres` — the theatre **pool**: Fandango id, name, chain code, optional
+  slug and direct-booking link, plus `metro` (`bay` / `la`), `city`, `lat`, `lng` for
+  the public site.
+- `watchlist.movies` — one entry per tracked movie: `title`, `match`, `movieId`,
+  `formats`, the subset of pool `theatres` it is contested at, and `mode`
+  (`seats` tracks pair quality; `onsale` polls cheaply until tickets open).
+  `expandTargets()` turns movies × theatres × formats into scan targets.
+- `tiers` — seat quality windows as **fractions**, derived per auditorium from its own
+  seat coordinates (row depth 0 front → 1 back, x 0 left → 1 right): `frontFrac`
+  excludes the front rows; `center` and `midBack` are depth × x windows; anything
+  else past the front rows is `flexible` (shown as *Edge* on the site).
+- `partySize` — the adjacent-group size the classifier counts (2 = pairs).
+- `politeness` — the request budget; see the section above.
 
-## Extending to any movie/theatre (future)
+## Adding a movie or theatre
 
-- Theatre codes come from the directory embedded in `regmovies.com/theatres`
-  (`path_name` like `regal-hacienda-crossings-0347`).
-- Movie HO-codes appear in each theatre page's `__NEXT_DATA__` or the URL of the
-  movie page. Swap `theatreCode` + `movieCodes`, adjust `tiers` for that auditorium's
-  geometry (row letters/column count differ per house).
+1. Find the theatre's Fandango id (the 5-letter code in its Fandango URL) and add it to
+   `watchlist.theatres` with `metro`, `city`, `lat`, `lng`.
+2. Add or edit a `watchlist.movies` entry listing that theatre id and the formats to track.
+3. `npm run all` — the next scan picks it up, the report and `signals.json` follow.

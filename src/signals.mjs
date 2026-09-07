@@ -32,7 +32,8 @@ function showSignal(s) {
     part: s.part,                     // morning | afternoon | evening | night
     workHours: s.workHours,
     tier: s.tierKey,                  // best pair tier, or null
-    pairs: s.pairs,                   // { center, midBack, flexible, total }
+    pairs: s.pairs,                   // { center, midBack, flexible, total } — adjacent groups of partySize
+    open: s.open,                     // { center, midBack, flexible } — single open seats per tier (solo-goers)
     usable: s.avail?.usable ?? 0,
     pctFull: s.avail?.pctFull ?? null,
     bookingUrl: s.bookingUrl,
@@ -46,6 +47,9 @@ function showSignal(s) {
 function theatreSignal(scan, liveCfg) {
   const cfg = { ...scan.config, tiers: liveCfg.tiers, partySize: liveCfg.partySize ?? scan.config.partySize };
   const f = cfg.fandango;
+  // Location + metro come from the live watchlist pool (joined by theatre id),
+  // not the cache, so adding coordinates never requires a rescan.
+  const pool = (liveCfg.watchlist?.theatres || []).find(t => t.id === f.theaterId) || {};
   const histPath = path.join(ROOT, 'data', `history-${targetKey(cfg)}.json`);
   let history = null;
   try { if (existsSync(histPath)) history = JSON.parse(readFileSync(histPath, 'utf8')); } catch { /* no trend */ }
@@ -66,6 +70,11 @@ function theatreSignal(scan, liveCfg) {
       name: cfg.theatreName || f.theaterSlug || f.theaterId,
       chain: cfg.directBooking?.label || f.chainCode || null,
       directBookingUrl: cfg.directBooking?.url || null,
+      fandangoUrl: pool.slug ? `https://www.fandango.com/${pool.slug}/theater-page` : null,
+      metro: pool.metro || null,
+      city: pool.city || null,
+      lat: typeof pool.lat === 'number' ? pool.lat : null,
+      lng: typeof pool.lng === 'number' ? pool.lng : null,
       format: f.formatFilter,
       mode: cfg.mode || 'seats',
       onSale: shows.length > 0, // onsale mode: false until tickets open
