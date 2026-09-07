@@ -1,0 +1,19 @@
+{
+  "name": "seat-scout",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Find showtimes with good adjacent seats for a movie at a Regal theatre",
+  "scripts": {
+    "app": "node src/app.mjs",
+    "scan": "node src/scan.mjs",
+    "watch": "node src/scan.mjs --watch",
+    "drops": "node src/drop-watch.mjs",
+    "bot": "node src/discord-bot.mjs",
+    "report": "node src/report.mjs",
+    "signals": "node src/signals.mjs",
+    "share": "node src/share-report.mjs",
+    "all": "node src/scan.mjs && node src/report.mjs && node src/signals.mjs",
+    "test": "node --test"
+  }
+}

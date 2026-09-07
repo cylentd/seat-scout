@@ -1,0 +1,70 @@
+{
+  "theatreName": "Regal Hacienda Crossings",
+  "directBooking": {
+    "label": "Regal",
+    "url": "https://www.regmovies.com/theatres/regal-hacienda-crossings-0347"
+  },
+  "fandango": {
+    "theaterId": "AAOPK",
+    "theaterSlug": "regal-hacienda-crossings-screenx-imax-and-rpx-aaopk",
+    "chainCode": "REGL",
+    "movieTitleMatch": "The Odyssey",
+    "movieId": 241386,
+    "formatFilter": "IMAX 70MM",
+    "scanDays": 40,
+    "stopAfterEmptyDays": 4,
+    "skipPairlessAfter": 2,
+    "movieTitle": "The Odyssey"
+  },
+  "partySize": 2,
+  "tiers": {
+    "excludeRows": [
+      "A",
+      "B",
+      "C"
+    ],
+    "center": {
+      "rows": [
+        "E",
+        "F",
+        "G"
+      ],
+      "xMin": 0.3,
+      "xMax": 0.7
+    },
+    "midBack": {
+      "rows": [
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I"
+      ],
+      "xMin": 0.12,
+      "xMax": 0.88
+    }
+  },
+  "politeness": {
+    "burstSize": 5,
+    "burstIntervalMs": 400,
+    "burstRestMs": 9000,
+    "jitter": 0.4,
+    "maxPerMinute": 20,
+    "offPeakOnly": false,
+    "offPeakStartHour": 22,
+    "offPeakEndHour": 7,
+    "_comment": "Good-citizen budget, page-load-shaped: bursts of burstSize requests spaced burstIntervalMs apart, then a jittered burstRestMs pause. maxPerMinute = rolling hard ceiling on top; set offPeakOnly=true to confine scans to offPeakStartHour..offPeakEndHour local time. Server 429/503 + Retry-After are always honored on top of this."
+  },
+  "cdpPort": 9222,
+  "browserSession": "real",
+  "regal": {
+    "theatreCode": "0347",
+    "movieCodes": {
+      "HO00019072": "The Odyssey",
+      "HO00021766": "The Odyssey (Open Cap/Eng Sub)"
+    },
+    "origin": "https://www.regmovies.com",
+    "note": "legacy source — GetSeatPlan is aggressively WAF-protected; see legacy-regal-scan.mjs"
+  }
+}

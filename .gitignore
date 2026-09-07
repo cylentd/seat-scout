@@ -1,0 +1,17 @@
+# Secrets — Discord bot token / webhook live here. Keep out of git; prefer the
+# SEAT_SCOUT_DISCORD_TOKEN / SEAT_SCOUT_DISCORD_WEBHOOK env vars (see README).
+/watchlist.json
+
+# Generated scan data, caches, logs (regenerable, large, churny)
+/data/
+
+# Generated outputs
+/public/
+/report.html
+
+# Dependencies (project is zero-dep today, but just in case)
+/node_modules/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
