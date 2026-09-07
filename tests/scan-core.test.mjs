@@ -4,6 +4,7 @@ import {
   isoPlusDays, matchingShowtimes, compactSeatMap, dateIsClean,
   ttlMs, daysBetween, pairTotals, targetKey, listMovies,
   observeResults, appendHistory, pairlessStreak, computeTrend, calendarDates,
+  expandTargets,
 } from '../src/scan-core.mjs';
 import { cfg, auditorium, makeShow } from './helpers.mjs';
 
@@ -289,4 +290,75 @@ test('calendarDates flattens per-movie day lists, optionally by hoCode', () => {
   assert.deepEqual(calendarDates(cal), ['2026-08-10', '2026-08-11', '2026-08-15']);
   assert.deepEqual(calendarDates(cal, ['HO1']), ['2026-08-10', '2026-08-11']);
   assert.deepEqual(calendarDates({}), []);
+});
+
+test('expandTargets: no watchlist returns the legacy single target unchanged', () => {
+  const legacy = { fandango: { theaterId: 'AAOPK' }, partySize: 2 };
+  assert.deepEqual(expandTargets(legacy), [legacy]);
+});
+
+test('expandTargets: per-movie theatres + mode, each a legacy-shaped target', () => {
+  const c = {
+    partySize: 2,
+    directBooking: { label: 'stale', url: 'x' },
+    watchlist: {
+      scanDays: 30, stopAfterEmptyDays: 3, skipPairlessAfter: 1,
+      theatres: [
+        { id: 'AAOPK', name: 'Hacienda', chainCode: 'REGL', slug: 'hac', directBooking: { label: 'Regal', url: 'r' } },
+        { id: 'AANEM', name: 'Metreon', chainCode: 'AMC' },
+        { id: 'AAACD', name: 'TCL Chinese', chainCode: '' },
+      ],
+      movies: [
+        // Odyssey: only its 70mm subset (2 of 3 theatres), seat mode.
+        { title: 'The Odyssey', match: 'Odyssey', movieId: 1, formats: ['IMAX 70MM'], theatres: ['AAOPK', 'AANEM'], mode: 'seats' },
+        // Avengers: a different subset with a bogus id, two formats, onsale mode.
+        { title: 'Avengers', match: 'Avengers', movieId: 2, formats: ['IMAX', 'Dolby'], theatres: ['AAACD', 'NOPE'], mode: 'onsale' },
+      ],
+    },
+  };
+  const targets = expandTargets(c);
+  // Odyssey: 2 theatres x 1 format = 2. Avengers: 1 valid theatre (NOPE skipped) x 2 formats = 2.
+  assert.equal(targets.length, 4);
+
+  for (const t of targets) {
+    assert.equal(t.watchlist, undefined);
+    assert.equal(t.partySize, 2);
+    assert.equal(t.fandango.scanDays, 30);
+    assert.equal(t.fandango.skipPairlessAfter, 1);
+  }
+
+  // Mode rides on each target.
+  assert.ok(targets.filter(t => t.fandango.movieTitle === 'The Odyssey').every(t => t.mode === 'seats'));
+  assert.ok(targets.filter(t => t.fandango.movieTitle === 'Avengers').every(t => t.mode === 'onsale'));
+
+  // Odyssey only hits its subset; TCL is not an Odyssey target.
+  const odyTheatres = targets.filter(t => t.fandango.movieTitle === 'The Odyssey').map(t => t.fandango.theaterId);
+  assert.deepEqual(odyTheatres.sort(), ['AANEM', 'AAOPK']);
+
+  // Unknown theatre id is skipped, not scanned as a phantom.
+  assert.equal(targets.some(t => t.fandango.theaterId === 'NOPE'), false);
+
+  // Theatre metadata resolved from the pool: own directBooking kept, missing one cleared.
+  const hac = targets.find(t => t.fandango.theaterId === 'AAOPK');
+  const met = targets.find(t => t.fandango.theaterId === 'AANEM');
+  assert.equal(hac.directBooking.label, 'Regal');
+  assert.equal(hac.fandango.theaterSlug, 'hac');
+  assert.equal(met.directBooking, null);
+  assert.equal(met.fandango.theaterSlug, 'theater-aanem'); // slug fallback
+
+  // Each (theatre, movie, format) is a distinct cache identity.
+  const keys = new Set(targets.map(targetKey));
+  assert.equal(keys.size, targets.length);
+});
+
+test('expandTargets: a movie with no theatres list falls back to the whole pool', () => {
+  const c = {
+    watchlist: {
+      theatres: [{ id: 'A', name: 'A' }, { id: 'B', name: 'B' }],
+      movies: [{ title: 'M', match: 'M', formats: ['IMAX'] }],
+    },
+  };
+  const targets = expandTargets(c);
+  assert.deepEqual(targets.map(t => t.fandango.theaterId).sort(), ['A', 'B']);
+  assert.ok(targets.every(t => t.mode === 'seats')); // default mode
 });

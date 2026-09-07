@@ -16,34 +16,45 @@
     "skipPairlessAfter": 2,
     "movieTitle": "The Odyssey"
   },
+  "watchlist": {
+    "_comment": "expandTargets() turns each movie x its theatres x its formats into one target (same shape as the legacy top-level 'fandango' block). 'theatres' is a POOL of metadata; each movie references the subset it cares about by id, because scarcity is per-movie. 'mode': 'seats' tracks seat-pair quality; 'onsale' watches cheaply for tickets to open, then seats. Scan-window knobs are shared by every target.",
+    "scanDays": 40,
+    "stopAfterEmptyDays": 4,
+    "skipPairlessAfter": 2,
+    "theatres": [
+      { "id": "AAOPK", "name": "Regal Hacienda Crossings", "chainCode": "REGL", "slug": "regal-hacienda-crossings-screenx-imax-and-rpx-aaopk", "metro": "bay", "directBooking": { "label": "Regal", "url": "https://www.regmovies.com/theatres/regal-hacienda-crossings-0347" } },
+      { "id": "AANEM", "name": "AMC Metreon 16", "chainCode": "AMC", "slug": "amc-metreon-16-aanem", "metro": "bay" },
+      { "id": "AAACD", "name": "TCL Chinese Theatres and IMAX", "chainCode": "", "metro": "la" },
+      { "id": "AAAWX", "name": "Universal Cinema, an AMC Theatre", "chainCode": "AMC", "metro": "la" },
+      { "id": "AAVPA", "name": "Regal LA Live", "chainCode": "REGL", "metro": "la" },
+      { "id": "AAEDM", "name": "Regal Edwards Ontario Palace", "chainCode": "REGL", "metro": "la" },
+      { "id": "AABTB", "name": "Regal Irvine Spectrum", "chainCode": "REGL", "metro": "la" }
+    ],
+    "movies": [
+      {
+        "_note": "Format-scarce: contested only at 70mm houses. Track all of them for seat quality.",
+        "title": "The Odyssey", "match": "Odyssey", "movieId": 241386,
+        "formats": ["IMAX 70MM"],
+        "theatres": ["AAOPK", "AANEM", "AAACD", "AAAWX", "AAVPA", "AAEDM", "AABTB"],
+        "mode": "seats"
+      }
+    ],
+    "_movies_example": [
+      {
+        "_note": "Release-scarce: add a tentpole here when it nears on-sale. 'onsale' mode polls cheaply for tickets to open, then flips to seat tracking for the opening window.",
+        "title": "Avengers: Doomsday", "match": "Avengers", "movieId": 0,
+        "formats": ["IMAX 70MM", "IMAX", "Dolby Cinema"],
+        "theatres": ["AAACD", "AAVPA", "AAAWX"],
+        "mode": "onsale"
+      }
+    ]
+  },
   "partySize": 2,
   "tiers": {
-    "excludeRows": [
-      "A",
-      "B",
-      "C"
-    ],
-    "center": {
-      "rows": [
-        "E",
-        "F",
-        "G"
-      ],
-      "xMin": 0.3,
-      "xMax": 0.7
-    },
-    "midBack": {
-      "rows": [
-        "D",
-        "E",
-        "F",
-        "G",
-        "H",
-        "I"
-      ],
-      "xMin": 0.12,
-      "xMax": 0.88
-    }
+    "_comment": "Auto-derived per auditorium: each row gets a depth fraction (0 front .. 1 back) from its seat coords, and these windows are fractions of that depth + normalized x. Works in any house (9 rows or 20). Tuned so the reference IMAX 70mm auditorium keeps its front-3-excluded / E-F-G-centre shape.",
+    "frontFrac": 0.30,
+    "center": { "rowMin": 0.44, "rowMax": 0.80, "xMin": 0.3, "xMax": 0.7 },
+    "midBack": { "rowMin": 0.30, "xMin": 0.12, "xMax": 0.88 }
   },
   "politeness": {
     "burstSize": 5,

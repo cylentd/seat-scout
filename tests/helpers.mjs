@@ -16,9 +16,12 @@ export const cfg = {
     stopAfterEmptyDays: 4,
   },
   tiers: {
-    excludeRows: ['A', 'B', 'C'],
-    center: { rows: ['E', 'F', 'G'], xMin: 0.3, xMax: 0.7 },
-    midBack: { rows: ['D', 'E', 'F', 'G', 'H', 'I'], xMin: 0.12, xMax: 0.88 },
+    // Depth fractions (0 front .. 1 back), auto-derived per auditorium. Tuned to
+    // reproduce the old A-I row config on the 9-row synthetic house: A,B,C front;
+    // E,F,G centre; D-I mid-back.
+    frontFrac: 0.30,
+    center: { rowMin: 0.44, rowMax: 0.80, xMin: 0.3, xMax: 0.7 },
+    midBack: { rowMin: 0.30, xMin: 0.12, xMax: 0.88 },
   },
 };
 

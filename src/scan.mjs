@@ -3,18 +3,20 @@
 // Sold-out showtimes are detected from the showtimes payload and skipped — the
 // seat-map endpoint is only hit for shows with availability.
 //
+// MULTI-TARGET: config.json's `watchlist` (theatres x movies x formats) is
+// expanded into one single-target scan each (expandTargets). One
+// theaterMovieShowtimes payload is fetched per (theatre, date) and SHARED across
+// every movie watched at that theatre (getShowtimes memo), so adding movies
+// costs seat-map calls, not showtimes calls. One PolitenessBudget governs the
+// whole run, so the per-minute ceiling holds across all targets, not per target.
+// Each target caches to its own file; the FIRST target also mirrors to
+// scan-latest.json so report.mjs stays a single known path.
+//
 // Usage: node src/scan.mjs [--fresh|--watch] [--start=YYYY-MM-DD]
-//   --start    begin the scan window at a later date instead of today — e.g. a
-//              known run extension — so no requests are spent walking the empty
-//              gap in between. Cached results before the window are kept.
-//   (default)  tiered-freshness scan: cached dates are reused only while young
-//              enough for how far out they are (see TTL_TIERS below); shows
-//              that have had zero bookable pairs for skipPairlessAfter straight
-//              observations keep their cached seat map instead of a re-fetch
-//   --fresh    ignore the cache entirely and re-fetch every date
-//   --watch    cheap check-in: re-fetch seat maps only for shows that had pairs
-//              in the last scan (plus one showtimes call per affected date to
-//              catch sell-outs) — the "should I book today?" run
+//   --start    begin the scan window at a later date instead of today.
+//   (default)  tiered-freshness scan (see TTL tiers in scan-core).
+//   --fresh    ignore the cache entirely and re-fetch every date.
+//   --watch    cheap check-in: re-fetch seat maps only for prior pair-bearers.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -24,15 +26,16 @@ import {
   isoPlusDays, matchingShowtimes, compactSeatMap, dateIsClean,
   ttlMs, daysBetween, pairTotals, sameTarget, targetKey,
   observeResults, appendHistory, pairlessStreak, calendarDates, calendarIsTheatreWide,
+  expandTargets,
 } from './scan-core.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const cfg = JSON.parse(readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
-const fd = cfg.fandango;
 const budget = new PolitenessBudget(cfg.politeness);
+const LATEST_PATH = path.join(ROOT, 'data', 'scan-latest.json');
 
-// Lightweight ANSI styling. No-ops when stdout isn't a terminal (piped or
-// redirected) or when NO_COLOR is set, so saved logs stay plain text.
+// Lightweight ANSI styling. No-ops when stdout isn't a terminal or NO_COLOR is
+// set, so saved logs stay plain text.
 const USE_COLOR = !!process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code, s) => (USE_COLOR ? `\x1b[${code}m${s}\x1b[0m` : s);
 const c = {
@@ -52,17 +55,11 @@ function dayLabel(iso, today) {
   return nice;
 }
 
-// Sell-rate history: one compact observation appended per completed run, so
-// the report can show how fast seats are moving (see computeTrend).
-const historyPath = path.join(ROOT, 'data', `history-${targetKey(cfg)}.json`);
-function recordHistory(results, kind, observed) {
-  const shows = observeResults(cfg, results, observed);
-  if (!Object.keys(shows).length) return;
-  let history = [];
-  try { if (existsSync(historyPath)) history = JSON.parse(readFileSync(historyPath, 'utf8')); } catch { /* corrupt -> restart */ }
-  history = appendHistory(history, { at: new Date().toISOString(), kind, shows });
-  writeFileSync(historyPath, JSON.stringify(history, null, 1));
-}
+// URL builders, parameterized by a target's fandango block.
+const showtimesUrl = (fd, date) =>
+  `/napi/theaterMovieShowtimes/${fd.theaterId}?chainCode=${fd.chainCode}&startDate=${date}&isdesktop=true&partnerRestrictedTicketing=`;
+const calendarUrl = (fd) =>
+  `/napi/theaterCalendar/${fd.theaterId}?chainCode=${fd.chainCode}`;
 
 function tryFetch(url) {
   try {
@@ -88,8 +85,7 @@ async function apiGet(url) {
     if (res.httpStatus === 200) return res.data;
 
     // 404/410 are permanent — the resource is gone (e.g. a showtime removed
-    // while still listed). Parking and retrying would stall the scan for
-    // minutes on something that can never succeed.
+    // while still listed). Parking and retrying would stall on the impossible.
     if (res.httpStatus === 404 || res.httpStatus === 410) throw new Error(`HTTP ${res.httpStatus} for ${url}`);
 
     const backoff = budget.backoffFor(res.httpStatus, res.retryAfter, attempt);
@@ -112,14 +108,52 @@ async function apiGet(url) {
   }
 }
 
+// Run-scoped showtimes memo: one theaterMovieShowtimes payload per (theatre,
+// date), shared across every movie watched at that theatre. Only successes are
+// cached, so a thrown error lets the next movie retry the date.
+const showtimesMemo = new Map();
+async function getShowtimes(fd, date) {
+  const key = `${fd.theaterId}|${date}`;
+  if (showtimesMemo.has(key)) return showtimesMemo.get(key);
+  const st = await apiGet(showtimesUrl(fd, date));
+  showtimesMemo.set(key, st);
+  return st;
+}
+
+// Per-target cache/history paths. The first target also mirrors to
+// scan-latest.json so report.mjs and sharing stay a single known path.
+function targetPaths(target, isPrimary) {
+  const key = targetKey(target);
+  const targetPath = path.join(ROOT, 'data', 'scans', `${key}.json`);
+  const historyPath = path.join(ROOT, 'data', `history-${key}.json`);
+  const outPaths = isPrimary ? [targetPath, LATEST_PATH] : [targetPath];
+  return { key, targetPath, historyPath, outPaths };
+}
+
+function loadPrev(target, targetPath, isPrimary) {
+  let prev = existsSync(targetPath) ? JSON.parse(readFileSync(targetPath, 'utf8')) : null;
+  if (!prev && isPrimary && existsSync(LATEST_PATH)) {
+    const latest = JSON.parse(readFileSync(LATEST_PATH, 'utf8'));
+    if (sameTarget(latest.config, target)) prev = latest; // migrate the pre-watchlist cache
+  }
+  if (prev && !sameTarget(prev.config, target)) prev = null; // hash-collision safety net
+  return prev;
+}
+
+// Sell-rate history: one compact observation appended per completed run.
+function recordHistory(historyPath, target, results, kind, observed) {
+  const shows = observeResults(target, results, observed);
+  if (!Object.keys(shows).length) return;
+  let history = [];
+  try { if (existsSync(historyPath)) history = JSON.parse(readFileSync(historyPath, 'utf8')); } catch { /* corrupt -> restart */ }
+  history = appendHistory(history, { at: new Date().toISOString(), kind, shows });
+  writeFileSync(historyPath, JSON.stringify(history, null, 1));
+}
+
 // One cheap calendar call: has the theatre opened dates beyond what we scanned?
-// Fandango serves theaterCalendar THEATRE-WIDE (not per-film) for both Regal and
-// AMC, so a hit means "the venue has some showtime out there" — not necessarily
-// this movie. Hence the hedged wording and the pointer at drop-watch, which
-// confirms per-film by asking theaterMovieShowtimes directly.
-async function supplyProbe(results, today) {
+async function supplyProbe(fd, results, today) {
   try {
-    const cal = await apiGet(`/napi/theaterCalendar/${fd.theaterId}?chainCode=${fd.chainCode}`);
+    const cal = await apiGet(calendarUrl(fd));
     const lastCached = results.map(r => r.date).sort().at(-1) || today;
     const fresh = calendarDates(cal).filter(d => d > lastCached);
     if (!fresh.length) return;
@@ -132,33 +166,29 @@ async function supplyProbe(results, today) {
   } catch { /* best-effort probe */ }
 }
 
-// --watch: revisit only the shows worth booking. One showtimes call per affected
-// date refreshes sold-out/expired flags for every show on that date; seat maps
-// are re-fetched just for the previous pair-bearers. ~7x fewer requests than a
-// full scan, so it can run daily without leaning on Fandango.
-async function watchRun(prev, outPaths, today) {
-  if (!prev) throw new Error('No previous scan to watch — run "node src/scan.mjs" first.');
+// --watch: revisit only the shows worth booking for one target.
+async function watchRun(target, historyPath, outPaths, prev, today) {
+  const fd = target.fandango;
+  if (!prev) { console.log(c.yellow('No previous scan to watch — run a full scan first.')); return; }
   const results = prev.results || [];
   const plan = [];
   for (const r of results) {
     if (r.date < today) continue;
-    const targets = r.shows.filter(s =>
-      s.seatMap && !s.expired && s.type === 'available' && pairTotals(cfg, s).pairs > 0);
-    if (targets.length) plan.push({ result: r, targets });
+    const shows = r.shows.filter(s =>
+      s.seatMap && !s.expired && s.type === 'available' && pairTotals(target, s).pairs > 0);
+    if (shows.length) plan.push({ result: r, shows });
   }
-  // Supply probe runs BEFORE the "nothing to watch" bail-out below. A run with
-  // no bookable pairs left is precisely when an extension matters most, so
-  // returning early without probing hid the one thing worth reporting.
-  await supplyProbe(results, today);
+  // Supply probe runs BEFORE the "nothing to watch" bail-out: a run with no
+  // bookable pairs left is exactly when an extension matters most.
+  await supplyProbe(fd, results, today);
 
-  const total = plan.reduce((n, p) => n + p.targets.length, 0);
+  const total = plan.reduce((n, p) => n + p.shows.length, 0);
   if (!total) {
     console.log(c.yellow('Nothing to watch — the last scan found no showtimes with bookable pairs.'));
     return;
   }
 
   console.log(c.bold(`Watching ${total} showtime${total === 1 ? '' : 's'} with bookable pairs across ${plan.length} day${plan.length === 1 ? '' : 's'}.`));
-  console.log('pairs = adjacent seats for your party  ·  usable = open seats in your preferred rows\n');
 
   const save = () => {
     const body = JSON.stringify({ ...prev, scannedAt: new Date().toISOString(), results }, null, 1);
@@ -166,21 +196,20 @@ async function watchRun(prev, outPaths, today) {
   };
 
   const tally = { up: 0, down: 0, same: 0, lost: 0, failed: 0 };
-  const STATS_W = 30; // width of the "pairs X → Y   usable A → B" block; tags align after it
-  const observed = new Set(); // show ids with genuinely fresh data this run
+  const STATS_W = 30;
+  const observed = new Set();
 
-  for (const { result, targets } of plan) {
+  for (const { result, shows } of plan) {
     const date = result.date;
     console.log(c.cyan(dayLabel(date, today)));
 
     try {
-      const st = await apiGet(`/napi/theaterMovieShowtimes/${fd.theaterId}?chainCode=${fd.chainCode}&startDate=${date}&isdesktop=true&partnerRestrictedTicketing=`);
+      const st = await getShowtimes(fd, date);
       const current = new Map(matchingShowtimes(st, fd).map(s => [s.id, s]));
       for (const show of result.shows) {
         const cur = current.get(show.id);
         if (cur) {
           show.type = cur.type; show.expired = cur.expired;
-          // A sold-out flag from the payload is a real observation (p=0, u=0).
           if (!show.expired && show.type === 'soldout') observed.add(String(show.id));
         }
       }
@@ -188,11 +217,11 @@ async function watchRun(prev, outPaths, today) {
       console.log('  ' + c.yellow(`showtimes refresh failed (${e.message.split('\n')[0]}) — keeping cached status`));
     }
 
-    for (const show of targets) {
+    for (const show of shows) {
       const time = String(show.timeLabel).padStart(6);
-      const before = pairTotals(cfg, show);
+      const before = pairTotals(target, show);
       if (show.expired || show.type !== 'available') {
-        delete show.seatMap; // no longer purchasable; report renders it sold out
+        delete show.seatMap;
         tally.lost++;
         const what = show.expired ? 'EXPIRED' : 'SOLD OUT';
         console.log(`  ${time}  ` + c.red(`had ${before.pairs} pair${before.pairs === 1 ? '' : 's'}  →  ${what}`));
@@ -203,13 +232,12 @@ async function watchRun(prev, outPaths, today) {
         show.seatMap = compactSeatMap(sm);
         delete show.error;
         observed.add(String(show.id));
-        const after = pairTotals(cfg, show);
+        const after = pairTotals(target, show);
         const d = after.pairs - before.pairs;
         let tag;
         if (d > 0) { tally.up++; tag = c.green(`↑ +${d} pair${d === 1 ? '' : 's'}`); }
         else if (d < 0) { tally.down++; tag = c.red(`↓ ${d} pair${d === -1 ? '' : 's'}`); }
         else { tally.same++; tag = 'no change'; }
-        // Pad the (uncolored) stats to a fixed width so the change tags line up in their own column.
         const stats = `pairs ${before.pairs} → ${after.pairs}   usable ${before.usable} → ${after.usable}`;
         console.log(`  ${time}  ${stats.padEnd(STATS_W)}  ${tag}`);
       } catch (e) {
@@ -222,7 +250,7 @@ async function watchRun(prev, outPaths, today) {
     console.log('');
   }
   save();
-  recordHistory(results, 'watch', { ids: observed });
+  recordHistory(historyPath, target, results, 'watch', { ids: observed });
 
   const parts = [];
   if (tally.up) parts.push(c.green(`${tally.up} improved`));
@@ -231,89 +259,63 @@ async function watchRun(prev, outPaths, today) {
   if (tally.same) parts.push(`${tally.same} unchanged`);
   if (tally.failed) parts.push(c.yellow(`${tally.failed} failed`));
   console.log(c.bold('Watch complete.') + '  ' + (parts.length ? parts.join('  ·  ') : 'no changes'));
-  console.log('The report rebuilds next (or run: node src/report.mjs).');
 }
 
-async function main() {
-  const fresh = process.argv.includes('--fresh');
-  const watch = process.argv.includes('--watch');
-  await ensureChromeReady(cfg);
-
-  const today = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD local
-  const startArg = (process.argv.find(a => a.startsWith('--start=')) || '').slice(8);
-  if (startArg && !/^\d{4}-\d{2}-\d{2}$/.test(startArg)) throw new Error(`--start wants YYYY-MM-DD, got "${startArg}"`);
-  const start = startArg > today ? startArg : today;
-  const dates = Array.from({ length: fd.scanDays }, (_, i) => isoPlusDays(start, i));
-
-  // Each target caches to its own file; scan-latest.json mirrors the most
-  // recent run so report.mjs (and sharing flows) stay a single known path.
-  const latestPath = path.join(ROOT, 'data', 'scan-latest.json');
-  const targetPath = path.join(ROOT, 'data', 'scans', `${targetKey(cfg)}.json`);
+// Full tiered-freshness scan for one target.
+async function scanOneTarget(target, { fresh, start, today, isPrimary }) {
+  const fd = target.fandango;
+  const { targetPath, historyPath, outPaths } = targetPaths(target, isPrimary);
   mkdirSync(path.dirname(targetPath), { recursive: true });
 
-  let prev = existsSync(targetPath) ? JSON.parse(readFileSync(targetPath, 'utf8')) : null;
-  if (!prev && existsSync(latestPath)) {
-    const latest = JSON.parse(readFileSync(latestPath, 'utf8'));
-    if (sameTarget(latest.config, cfg)) prev = latest; // migrate pre-per-target caches
-  }
-  if (prev && !sameTarget(prev.config, cfg)) prev = null; // hash-collision safety net
-
-  if (watch) return watchRun(prev, [targetPath, latestPath], today);
-
+  const dates = Array.from({ length: fd.scanDays }, (_, i) => isoPlusDays(start, i));
+  const prev = loadPrev(target, targetPath, isPrimary);
   const prevByDate = new Map((!fresh && prev?.results || []).map(r => [r.date, r]));
 
+  // Reuse cached dates only while young enough for how far out they are.
   const resultsByDate = new Map();
   for (const d of dates) {
     const cached = prevByDate.get(d);
     if (!cached || !dateIsClean(cached)) continue;
-    // Reuse only while the cache is young enough for how far out the date is.
     if (!cached.scannedAt) cached.scannedAt = prev.scannedAt; // pre-TTL scans
     const age = Date.now() - new Date(cached.scannedAt).getTime();
     if (age <= ttlMs(daysBetween(today, d))) resultsByDate.set(d, cached);
   }
+
   const save = () => {
-    // The scan window is a slice of the run, not all of it: --start begins it
-    // later, and scanDays bounds its far edge. Cached results on either side
-    // (tonight's bookable show; a tail a longer prior scan reached) stay put.
+    // Cached results on either side of the window (a tail a longer prior scan
+    // reached; tonight's show before --start) stay put.
     const beyond = (prev?.results || []).filter(r =>
       r.date >= today && (r.date < start || r.date > dates.at(-1)));
     const results = [...beyond, ...dates.map(d => resultsByDate.get(d)).filter(Boolean)]
       .sort((a, b) => a.date < b.date ? -1 : 1);
-    const body = JSON.stringify({ scannedAt: new Date().toISOString(), source: 'fandango', config: cfg, results }, null, 1);
-    writeFileSync(targetPath, body);
-    writeFileSync(latestPath, body);
+    const body = JSON.stringify({ scannedAt: new Date().toISOString(), source: 'fandango', config: target, results }, null, 1);
+    for (const p of outPaths) writeFileSync(p, body);
     return results;
   };
 
-  // Skip-rule inputs: a show with zero bookable pairs for skipPairlessAfter
-  // straight observations keeps its cached seat map instead of costing a fresh
-  // request every scan ('·' in the progress line). Carried shows are excluded
-  // from history observation so a stale map can never extend its own streak;
-  // --fresh has no cache and so refetches everything.
   const SKIP_AFTER = fd.skipPairlessAfter ?? 2;
   let history = [];
   try { if (existsSync(historyPath)) history = JSON.parse(readFileSync(historyPath, 'utf8')); } catch { /* corrupt -> no skips */ }
 
   let emptyStreak = 0;
-  const observedIds = new Set(); // show ids with genuinely fresh data this run
+  const observedIds = new Set();
   for (const date of dates) {
     if (resultsByDate.has(date)) {
-      const c = resultsByDate.get(date);
-      const ageH = Math.round((Date.now() - new Date(c.scannedAt).getTime()) / 3600_000);
-      console.log(`${date}: using previous result (${c.shows.length} shows, ${ageH}h old)`);
-      if (c.shows.length === 0 && ++emptyStreak >= fd.stopAfterEmptyDays) break; else if (c.shows.length) emptyStreak = 0;
+      const cached = resultsByDate.get(date);
+      const ageH = Math.round((Date.now() - new Date(cached.scannedAt).getTime()) / 3600_000);
+      console.log(`${date}: using previous result (${cached.shows.length} shows, ${ageH}h old)`);
+      if (cached.shows.length === 0 && ++emptyStreak >= fd.stopAfterEmptyDays) break; else if (cached.shows.length) emptyStreak = 0;
       continue;
     }
     process.stdout.write(`${date}: `);
     const prevShows = new Map((prevByDate.get(date)?.shows || []).map(s => [s.id, s]));
     const out = { date, scannedAt: new Date().toISOString(), shows: [], errors: [] };
     try {
-      const st = await apiGet(`/napi/theaterMovieShowtimes/${fd.theaterId}?chainCode=${fd.chainCode}&startDate=${date}&isdesktop=true&partnerRestrictedTicketing=`);
+      const st = await getShowtimes(fd, date);
       const shows = matchingShowtimes(st, fd);
       for (const show of shows) {
         if (show.expired || show.type !== 'available') {
           out.shows.push(show);
-          // A sold-out flag from the payload is a real observation (p=0, u=0).
           if (!show.expired && show.type === 'soldout') observedIds.add(String(show.id));
           process.stdout.write(show.type === 'soldout' ? 'S' : 'x');
           continue;
@@ -346,13 +348,54 @@ async function main() {
   }
 
   const results = save();
-  recordHistory(results, 'scan', { ids: observedIds });
+  recordHistory(historyPath, target, results, 'scan', { ids: observedIds });
   const counts = results.flatMap(r => r.shows);
   const withSeats = counts.filter(s => s.seatMap).length;
   const soldout = counts.filter(s => s.type === 'soldout').length;
   const failed = counts.filter(s => s.error).length;
-  console.log(`\nDone. ${counts.length} showtimes: ${withSeats} with seat maps, ${soldout} sold out, ${failed} failed -> ${targetPath}`);
-  if (failed || results.some(r => r.errors.length)) console.log('Incomplete — re-run "node src/scan.mjs" to fill gaps.');
+
+  // onsale mode: before tickets open the title simply isn't in the payload, so
+  // zero shows is the "not on sale yet" signal, not an error. Once it appears,
+  // the same scan captures seats — no mode switch needed.
+  if (target.mode === 'onsale' && counts.length === 0) {
+    console.log('⏳ Not on sale yet — no showtimes for this title/format.');
+    return;
+  }
+  console.log(`Done. ${counts.length} showtimes: ${withSeats} with seat maps, ${soldout} sold out, ${failed} failed`);
+  if (failed || results.some(r => r.errors.length)) console.log('Incomplete — re-run to fill gaps.');
+}
+
+async function main() {
+  const fresh = process.argv.includes('--fresh');
+  const watch = process.argv.includes('--watch');
+  await ensureChromeReady(cfg);
+
+  const today = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD local
+  const startArg = (process.argv.find(a => a.startsWith('--start=')) || '').slice(8);
+  if (startArg && !/^\d{4}-\d{2}-\d{2}$/.test(startArg)) throw new Error(`--start wants YYYY-MM-DD, got "${startArg}"`);
+  const start = startArg > today ? startArg : today;
+
+  const targets = expandTargets(cfg);
+  console.log(c.bold(`Scanning ${targets.length} target${targets.length === 1 ? '' : 's'}${watch ? ' (watch)' : fresh ? ' (fresh)' : ''}.`));
+
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i];
+    const isPrimary = i === 0;
+    const fd = target.fandango;
+    const label = `${fd.movieTitle || fd.movieTitleMatch} · ${fd.formatFilter} · ${target.theatreName || fd.theaterId}`;
+    console.log('\n' + c.bold(c.cyan(`=== ${label} ===`)));
+    try {
+      if (watch) {
+        const { targetPath, historyPath, outPaths } = targetPaths(target, isPrimary);
+        const prev = loadPrev(target, targetPath, isPrimary);
+        await watchRun(target, historyPath, outPaths, prev, today);
+      } else {
+        await scanOneTarget(target, { fresh, start, today, isPrimary });
+      }
+    } catch (e) {
+      console.error(c.red(`[${label}] ${e.message.split('\n')[0]}`));
+    }
+  }
 }
 
 main().catch(e => { console.error(e.message); process.exit(1); });

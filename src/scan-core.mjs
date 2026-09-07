@@ -87,6 +87,59 @@ export function targetKey(cfg) {
   return `${slug}-${h.toString(16)}`;
 }
 
+// Expand a watchlist into one single-target cfg per (theatre, movie, format) —
+// each identical in shape to the legacy top-level `fandango` block, so
+// targetKey / sameTarget / matchingShowtimes / analyzeShow and the whole report
+// path keep working per target with no changes.
+//
+// `theatres` is a POOL of theatre metadata; each movie references the subset it
+// cares about by id (`movie.theatres`), because "hard to get" is per-movie:
+// The Odyssey is contested only at 70mm houses, a tentpole only in its on-sale
+// window. A movie carries a `mode` ("seats" = track seat quality; "onsale" =
+// watch cheaply for tickets to open, then seats). A movie with no `theatres`
+// list falls back to the whole pool. Without a watchlist, the legacy single
+// target is returned unchanged.
+export function expandTargets(cfg) {
+  const w = cfg.watchlist;
+  if (!w || !Array.isArray(w.theatres) || !Array.isArray(w.movies)) return [cfg];
+
+  const pool = new Map(w.theatres.map(t => [t.id, t]));
+  const base = { ...cfg };
+  delete base.watchlist;
+  const scanDays = w.scanDays ?? cfg.fandango?.scanDays ?? 40;
+  const stopAfterEmptyDays = w.stopAfterEmptyDays ?? cfg.fandango?.stopAfterEmptyDays ?? 4;
+  const skipPairlessAfter = w.skipPairlessAfter ?? cfg.fandango?.skipPairlessAfter ?? 2;
+
+  const out = [];
+  for (const mv of w.movies) {
+    const ids = Array.isArray(mv.theatres) && mv.theatres.length ? mv.theatres : [...pool.keys()];
+    const mode = mv.mode || 'seats';
+    for (const id of ids) {
+      const th = pool.get(id);
+      if (!th) continue; // unknown id — skip rather than scan a phantom theatre
+      for (const format of mv.formats || []) {
+        out.push({
+          ...base,
+          mode,
+          theatreName: th.name,
+          directBooking: th.directBooking || null, // each theatre owns its link
+          fandango: {
+            theaterId: th.id,
+            theaterSlug: th.slug || `theater-${String(th.id).toLowerCase()}`,
+            chainCode: th.chainCode || '',
+            movieTitleMatch: mv.match,
+            movieId: mv.movieId,
+            movieTitle: mv.title,
+            formatFilter: format,
+            scanDays, stopAfterEmptyDays, skipPairlessAfter,
+          },
+        });
+      }
+    }
+  }
+  return out.length ? out : [cfg];
+}
+
 // Every movie playing in a theaterMovieShowtimes payload, with its formats —
 // feeds the landing page's "playing now" suggestions.
 // Poster art from a Fandango movie object. Real shape: `poster` / `darkPoster`,

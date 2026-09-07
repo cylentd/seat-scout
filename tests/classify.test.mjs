@@ -126,3 +126,18 @@ test('rankShows date tiebreak prefers the sooner show', () => {
   const a = mk('2026-08-01+19:00'), b = mk('2026-08-02+19:00');
   assert.deepEqual(rankShows([b, a]), [a, b]);
 });
+
+test('adjacency falls back to geometry when rightNeighbor is null', () => {
+  // Some houses (AMC, some Regal) return rightNeighbor null; adjacency must then
+  // come from geometry: same row, next seat within ~1.6 seat-widths of pitch.
+  const mk = (id, x) => ({ id, x, y: 50, w: 13, h: 13, col: 0, status: 'A', type: 'standard', right: null });
+  const pairs = (a) => a.duos.center + a.duos.midBack + a.duos.flexible;
+
+  // Two adjacent seats (pitch ~1 width), no right link -> one pair from geometry.
+  const adj = analyzeShow(cfg, { seatMap: { seats: [mk('F10', 100), mk('F11', 113)] } });
+  assert.equal(pairs(adj), 1);
+
+  // A wide aisle gap (pitch >> width) is not adjacency -> no pair.
+  const gap = analyzeShow(cfg, { seatMap: { seats: [mk('F10', 100), mk('F11', 260)] } });
+  assert.equal(pairs(gap), 0);
+});

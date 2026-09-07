@@ -5,19 +5,44 @@
 const ROW_RE = /^([A-Z]+)(\d+)$/;
 const RANK = { center: 0, midBack: 1, flexible: 2, front: 3 };
 
+// Each row's depth as a fraction 0 (front, nearest the screen) .. 1 (back),
+// derived from the seat map's own geometry (mean y per row, y=0 is the screen).
+// This is what lets the tier windows below work in ANY auditorium instead of a
+// single hardcoded house: a 9-row and a 20-row theatre both get a 0..1 scale.
+function rowDepths(seats) {
+  const sumY = new Map(), n = new Map();
+  for (const s of seats) {
+    const row = (s.id.match(ROW_RE) || [])[1];
+    if (!row) continue;
+    sumY.set(row, (sumY.get(row) || 0) + s.y);
+    n.set(row, (n.get(row) || 0) + 1);
+  }
+  const rows = [...sumY.keys()].map(r => [r, sumY.get(r) / n.get(r)]);
+  rows.sort((a, b) => a[1] - b[1]); // low y (front) -> high y (back)
+  const last = rows.length - 1;
+  const depth = new Map();
+  rows.forEach(([r], i) => depth.set(r, last <= 0 ? 0.5 : i / last));
+  return depth;
+}
+
 export function analyzeShow(cfg, show) {
   const t = cfg.tiers;
   const seats = show.seatMap?.seats || [];
   const minX = Math.min(...seats.map(s => s.x));
   const maxX = Math.max(...seats.map(s => s.x));
   const span = Math.max(1, maxX - minX);
+  const rowDepth = rowDepths(seats);
 
+  // Tier windows are fractions of row depth + normalized x, not fixed row
+  // letters — so "front third excluded, middle-depth centre band" holds whether
+  // the house has 9 rows or 20.
   const tierOf = (seat) => {
     const row = (seat.id.match(ROW_RE) || [])[1] || '?';
-    if (t.excludeRows.includes(row)) return 'front';
+    const d = rowDepth.get(row) ?? 1;
+    if (d < t.frontFrac) return 'front';
     const cx = (seat.x - minX) / span;
-    if (t.center.rows.includes(row) && cx >= t.center.xMin && cx <= t.center.xMax) return 'center';
-    if (t.midBack.rows.includes(row) && cx >= t.midBack.xMin && cx <= t.midBack.xMax) return 'midBack';
+    if (d >= t.center.rowMin && d <= t.center.rowMax && cx >= t.center.xMin && cx <= t.center.xMax) return 'center';
+    if (d >= t.midBack.rowMin && cx >= t.midBack.xMin && cx <= t.midBack.xMax) return 'midBack';
     return 'flexible';
   };
 
@@ -43,15 +68,41 @@ export function analyzeShow(cfg, show) {
 // each run; a group's tier is the worst of its seats, and groups touching the
 // front rows don't count. (`duos` keeps its name for compatibility — it now
 // means "groups of partySize".)
+// Right-hand neighbor resolver. Prefer the API's rightNeighbor; fall back to
+// geometry (same row, next seat by x within ~1.6 seat-widths of pitch, so an
+// aisle breaks the run) for theatres whose seat maps don't populate
+// rightNeighbor — some AMC and Regal houses return it null for most seats.
+function buildRightOf(decorated) {
+  const byId = new Map(decorated.map(s => [s.id, s]));
+  const byRow = new Map();
+  for (const s of decorated) {
+    const row = (s.id.match(ROW_RE) || [])[1] || `y${Math.round(s.y)}`;
+    if (!byRow.has(row)) byRow.set(row, []);
+    byRow.get(row).push(s);
+  }
+  const geomRight = new Map();
+  for (const list of byRow.values()) {
+    list.sort((a, b) => a.x - b.x);
+    for (let i = 0; i < list.length - 1; i++) {
+      const a = list[i], b = list[i + 1];
+      const pitch = b.x - a.x;
+      if (pitch > 0 && pitch <= 1.6 * (a.w || 1)) geomRight.set(a.id, b.id);
+    }
+  }
+  return (seat) => (seat.right && byId.has(seat.right)) ? seat.right : (geomRight.get(seat.id) || null);
+}
+
 function countRealisticGroups(decorated, size) {
   const duos = { center: 0, midBack: 0, flexible: 0 };
   const byId = new Map(decorated.map(s => [s.id, s]));
+  const rightOf = buildRightOf(decorated);
   const openStd = s => s && s.open && s.std;
 
   // A seat starts a run if it's open-standard and nothing open-standard points to it.
   const pointedTo = new Set();
   for (const s of decorated) {
-    if (openStd(s) && s.right && openStd(byId.get(s.right))) pointedTo.add(s.right);
+    const r = rightOf(s);
+    if (openStd(s) && r && openStd(byId.get(r))) pointedTo.add(r);
   }
 
   for (const s of decorated) {
@@ -60,7 +111,8 @@ function countRealisticGroups(decorated, size) {
     let cur = s;
     while (openStd(cur)) {
       run.push(cur);
-      cur = cur.right ? byId.get(cur.right) : null;
+      const r = rightOf(cur);
+      cur = r ? byId.get(r) : null;
     }
     for (let i = 0; i + size - 1 < run.length; i += size) {
       const group = run.slice(i, i + size);
