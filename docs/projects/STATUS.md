@@ -4,7 +4,7 @@ One line per active thread. Update the moment you stop working on something — 
 
 | Thread | Branch | Status | Next action | Touched |
 |---|---|---|---|---|
-| _(none active)_ | | | | |
+| _(none active: archived 2026-10-06; open decisions in `TODO.md`)_ | | | | |
 
 ## Test backlog
 
