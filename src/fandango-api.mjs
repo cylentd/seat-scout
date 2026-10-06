@@ -26,11 +26,12 @@ function tryFetch(cfg, url) {
 // Honors server backpressure (429/503 + Retry-After) exactly; a hard block
 // (403/challenge) parks and waits for a human to clear the check. `log` is
 // injected so callers control verbosity — drop-watch runs unattended.
-export async function apiGet(cfg, budget, path, { log = () => {}, parkMinutes = 15 } = {}) {
+// `fetchPage` is the in-page fetch; only tests swap it.
+export async function apiGet(cfg, budget, path, { log = () => {}, parkMinutes = 15, fetchPage = tryFetch } = {}) {
   const url = path.startsWith('http') ? path : ORIGIN + path;
   for (let attempt = 1; ; attempt++) {
     await budget.beforeRequest();
-    const res = tryFetch(cfg, url);
+    const res = fetchPage(cfg, url);
     if (res.httpStatus === 200) return res.data;
 
     // 404/410 are permanent — the resource is gone (e.g. a showtime removed
@@ -54,7 +55,7 @@ export async function apiGet(cfg, budget, path, { log = () => {}, parkMinutes = 
     const deadline = Date.now() + parkMinutes * 60 * 1000;
     while (Date.now() < deadline) {
       await sleep(120000);
-      const r2 = tryFetch(cfg, url);
+      const r2 = fetchPage(cfg, url);
       if (r2.httpStatus === 200) { log('Access restored'); return r2.data; }
     }
     throw new Error(`${res.error || 'HTTP ' + res.httpStatus} for ${url}`);

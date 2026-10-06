@@ -20,8 +20,9 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { evalInChrome, ensureChromeReady } from './browser.mjs';
-import { PolitenessBudget, sleep } from './polite.mjs';
+import { ensureChromeReady } from './browser.mjs';
+import { PolitenessBudget } from './polite.mjs';
+import { apiGet as fandangoGet } from './fandango-api.mjs';
 import {
   isoPlusDays, matchingShowtimes, compactSeatMap, dateIsClean,
   ttlMs, daysBetween, pairTotals, sameTarget, targetKey,
@@ -61,52 +62,14 @@ const showtimesUrl = (fd, date) =>
 const calendarUrl = (fd) =>
   `/napi/theaterCalendar/${fd.theaterId}?chainCode=${fd.chainCode}`;
 
-function tryFetch(url) {
-  try {
-    return evalInChrome(cfg, `
-(async () => {
-  const r = await fetch(${JSON.stringify(url)}, {credentials: 'include'});
-  const retryAfter = r.headers.get('retry-after');
-  if (!r.ok) return { httpStatus: r.status, retryAfter };
-  return { httpStatus: 200, data: await r.json() };
-})()`);
-  } catch (e) {
-    return { httpStatus: 0, error: e.message.split('\n')[0] };
-  }
-}
-
-// Every request passes through the politeness budget (rate cap + off-peak gate).
-// Server backpressure (429/503 + Retry-After) is honored exactly; a hard block
-// (403/challenge) parks and waits for a human to clear the check.
-async function apiGet(url) {
-  for (let attempt = 1; ; attempt++) {
-    await budget.beforeRequest();
-    const res = tryFetch(url);
-    if (res.httpStatus === 200) return res.data;
-
-    // 404/410 are permanent — the resource is gone (e.g. a showtime removed
-    // while still listed). Parking and retrying would stall on the impossible.
-    if (res.httpStatus === 404 || res.httpStatus === 410) throw new Error(`HTTP ${res.httpStatus} for ${url}`);
-
-    const backoff = budget.backoffFor(res.httpStatus, res.retryAfter, attempt);
-    if (backoff > 0 && attempt <= 6) {
-      console.log(c.yellow(`\n[${res.httpStatus}${res.retryAfter ? ' Retry-After ' + res.retryAfter : ''}] honoring backpressure — waiting ${Math.round(backoff / 1000)}s`));
-      await sleep(backoff);
-      continue;
-    }
-
-    // Not throttling — a hard block or dead page. One quiet retry, then park.
-    if (attempt === 1) { console.log(c.yellow(`\n[${res.error || 'HTTP ' + res.httpStatus}] backing off 90s…`)); await sleep(90000); continue; }
-    console.log(c.red('*** Blocked — parking. If Chrome shows a verification prompt, click it. ***'));
-    const deadline = Date.now() + 15 * 60 * 1000;
-    while (Date.now() < deadline) {
-      await sleep(120000);
-      const r2 = tryFetch(url);
-      if (r2.httpStatus === 200) { console.log(c.green('*** Access restored ***')); return r2.data; }
-    }
-    throw new Error(`${res.error || 'HTTP ' + res.httpStatus} for ${url}`);
-  }
-}
+// Every request goes through the shared request layer (fandango-api.mjs): the
+// politeness budget, exact Retry-After backpressure, and parking on a hard block.
+// Only the console styling is scan's own.
+const scanLog = msg =>
+  console.log(msg.startsWith('Blocked') ? c.red(`*** ${msg} ***`)
+    : msg.startsWith('Access') ? c.green(`*** ${msg} ***`)
+    : c.yellow(`\n${msg}`));
+const apiGet = url => fandangoGet(cfg, budget, url, { log: scanLog });
 
 // Run-scoped showtimes memo: one theaterMovieShowtimes payload per (theatre,
 // date), shared across every movie watched at that theatre. Only successes are

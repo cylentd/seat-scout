@@ -22,9 +22,10 @@ export class PolitenessBudget {
     this.offPeakOnly = p.offPeakOnly ?? false;
     this.offPeakStartHour = p.offPeakStartHour ?? 22;  // local hour inclusive
     this.offPeakEndHour = p.offPeakEndHour ?? 7;       // local hour exclusive
-    this._last = 0;
-    this._burst = 0;                                   // requests in the current burst
+    this._last = 0; // nomutate: means "never"; any small value is ~1.7e12ms before a real Date.now(), so the first request always sees a full rest
+    this._burst = 0; // nomutate: requests in the current burst; the first request always resets it (since >= burstRestMs, see _last)
     this._stamps = [];                                 // request times in the last 60s
+    this._queue = Promise.resolve();                   // overlapping callers take turns
   }
 
   _jit(ms) {
@@ -48,8 +49,15 @@ export class PolitenessBudget {
     }
   }
 
-  // Call immediately before each network request.
-  async beforeRequest() {
+  // Call immediately before each network request. Calls are served one at a time,
+  // so two overlapping callers are spaced exactly as if the second called later.
+  beforeRequest() {
+    const turn = this._queue.then(() => this._admit());
+    this._queue = turn.catch(() => {});
+    return turn;
+  }
+
+  async _admit() {
     await this._waitForOffPeak();
     const now = Date.now();
 

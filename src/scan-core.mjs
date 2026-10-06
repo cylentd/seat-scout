@@ -81,8 +81,8 @@ export function sameTarget(prevCfg, cfg) {
 export function targetKey(cfg) {
   const fd = cfg.fandango;
   const raw = [fd.theaterId, fd.chainCode, fd.formatFilter, fd.movieTitleMatch].join('|');
-  let h = 5381;
-  for (const ch of raw) h = ((h * 33) ^ ch.codePointAt(0)) >>> 0;
+  let h = 5381; // nomutate: hash seed; any seed gives stable, distinct keys and the tests can only require that
+  for (const ch of raw) h = ((h * 33) ^ ch.codePointAt(0)) >>> 0; // nomutate: multiplier and shift are arbitrary mixing constants; only stability and distinctness are specified
   const slug = raw.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
   return `${slug}-${h.toString(16)}`;
 }

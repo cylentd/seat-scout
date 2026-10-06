@@ -314,7 +314,7 @@ returns the visitor's approximate coordinates from Vercel's IP-geolocation heade
 first; the "Nearest to me" button then upgrades to a precise device fix on request. Locally
 the route 404s and the site falls back to best-seats order.
 
-Preview locally with any static server, e.g. `python -m http.server 8790 --directory public`.
+Preview locally through the machine's shared server at `http://localhost:8000/seat-scout/` (it serves `public/`; see AGENTS.md).
 Live at **https://seat-scout-tan.vercel.app** (Vercel project `seat-scout`). `vercel.json`
 points Vercel at `public/` as a plain static deploy; `.vercelignore` is an allow-list so only
 `public/`, `api/`, and `vercel.json` ever upload (never scan caches or `watchlist.json`).

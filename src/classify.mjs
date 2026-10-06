@@ -116,7 +116,7 @@ function countRealisticGroups(decorated, size) {
     }
     for (let i = 0; i + size - 1 < run.length; i += size) {
       const group = run.slice(i, i + size);
-      const tier = group.reduce((worst, seat) => RANK[seat.tier] >= RANK[worst] ? seat.tier : worst, 'center');
+      const tier = group.reduce((worst, seat) => RANK[seat.tier] >= RANK[worst] ? seat.tier : worst, 'center'); // nomutate: a tie swaps a tier name for the same name, so >= and > agree
       if (tier !== 'front') duos[tier]++;
     }
   }
@@ -137,7 +137,7 @@ export function practicality(ticketingDate) {
 
 // Rank: doable times first, then seat quality, then how many pairs, then soonest.
 export function rankShows(analyzed) {
-  const tierRank = s => (s.bestTier ? RANK[s.bestTier] : 9);
+  const tierRank = s => (s.bestTier ? RANK[s.bestTier] : 9); // nomutate: 9 only has to exceed every real rank (0-3); 10 sorts the same
   const pairTotal = s => s.duos.center + s.duos.midBack + s.duos.flexible;
   return [...analyzed].sort((a, b) =>
     (practicality(a.ticketingDate) - practicality(b.ticketingDate)) ||
